@@ -1,6 +1,6 @@
 # Movie API
 
-A simple REST API for managing movies, built with Go and [Gorilla Mux](https://github.com/gorilla/mux). Movies are stored in memory and the API supports creating, reading, updating, and deleting them.
+A REST API for managing movies, built with Go and [Gorilla Mux](https://github.com/gorilla/mux). The project includes a Dockerized PostgreSQL development database and supports creating, reading, updating, and deleting movies.
 
 ## Features
 
@@ -11,10 +11,13 @@ A simple REST API for managing movies, built with Go and [Gorilla Mux](https://g
 - Delete a movie
 - JSON request and response bodies
 - Appropriate HTTP status codes for common outcomes
+- PostgreSQL 17 development environment with Docker Compose
+- Environment-based application configuration
 
 ## Requirements
 
 - Go 1.22 or later
+- Docker with Docker Compose
 
 ## Run locally
 
@@ -25,11 +28,35 @@ git clone https://github.com/Pratiksable/movie-api.git
 cd movie-api
 ```
 
-Enter the backend module, download its dependencies, and start the API:
+Enter the backend module and download its dependencies:
 
 ```bash
 cd server
 go mod download
+```
+
+Create `server/.env`:
+
+```env
+PORT=8000
+DATABASE_URL=postgres://root:root@localhost:5432/movie_db?sslmode=disable
+```
+
+Do not add spaces around `=`. The `.env` file is ignored by Git because it can contain local credentials.
+
+Start PostgreSQL:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Load the environment variables and start the API:
+
+```bash
+set -a
+source .env
+set +a
 go run ./cmd/api
 ```
 
@@ -44,6 +71,8 @@ movie-api/
 │   │   └── api/
 │   │       └── main.go
 │   ├── internal/
+│   │   ├── config/
+│   │   │   └── config.go
 │   │   ├── handler/
 │   │   │   └── movie_handler.go
 │   │   ├── model/
@@ -52,6 +81,8 @@ movie-api/
 │   │   │   └── movie_router.go
 │   │   └── service/
 │   │       └── movie_service.go
+│   ├── migrations/
+│   ├── docker-compose.yaml
 │   ├── go.mod
 │   └── go.sum
 ├── .gitignore
@@ -60,10 +91,39 @@ movie-api/
 ```
 
 - `cmd/api` is the application entry point and starts the HTTP server.
+- `internal/config` reads the port and database URL from environment variables.
 - `internal/router` registers the API endpoints and connects them to handlers.
 - `internal/handler` processes HTTP requests and responses.
 - `internal/model` defines the movie and director data structures.
 - `internal/service` is reserved for business logic as the application grows.
+- `migrations` will contain SQL schema migrations.
+- `docker-compose.yaml` runs the local PostgreSQL database.
+
+## PostgreSQL with Docker
+
+The Compose service runs PostgreSQL 17 with these local development settings:
+
+| Setting | Value |
+| --- | --- |
+| Container | `movie-api-postgres` |
+| Host | `localhost` |
+| Port | `5432` |
+| Database | `movie_db` |
+| User | `root` |
+
+View the database logs:
+
+```bash
+docker compose logs postgres
+```
+
+Stop the containers while preserving database data:
+
+```bash
+docker compose down
+```
+
+The named Docker volume `movie_postgres_data` preserves PostgreSQL data between container restarts.
 
 ## Movie format
 
@@ -151,6 +211,7 @@ A successful deletion returns an empty response with status `204 No Content`.
 
 - Data is stored in memory and resets whenever the server restarts.
 - The in-memory movie list starts empty; create records with `POST /movies`.
+- PostgreSQL is available through Docker, but the repository layer has not been connected to the handlers yet.
 - This project is intended for learning Go HTTP APIs and REST fundamentals.
 
 ## Development checks
