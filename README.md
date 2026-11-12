@@ -13,6 +13,8 @@ A REST API for managing movies, built with Go and [Gorilla Mux](https://github.c
 - Appropriate HTTP status codes for common outcomes
 - PostgreSQL 17 development environment with Docker Compose
 - Environment-based application configuration
+- Persistent PostgreSQL storage using `pgx`
+- Automatic database table creation at application startup
 
 ## Requirements
 
@@ -73,15 +75,18 @@ movie-api/
 │   ├── internal/
 │   │   ├── config/
 │   │   │   └── config.go
+│   │   ├── database/
+│   │   │   └── postgres.go
 │   │   ├── handler/
 │   │   │   └── movie_handler.go
 │   │   ├── model/
 │   │   │   └── movie_model.go
+│   │   ├── repository/
+│   │   │   └── movie_repository.go
 │   │   ├── router/
 │   │   │   └── movie_router.go
 │   │   └── service/
 │   │       └── movie_service.go
-│   ├── migrations/
 │   ├── docker-compose.yaml
 │   ├── go.mod
 │   └── go.sum
@@ -92,12 +97,19 @@ movie-api/
 
 - `cmd/api` is the application entry point and starts the HTTP server.
 - `internal/config` reads the port and database URL from environment variables.
+- `internal/database` creates the connection pool and ensures the database table exists.
 - `internal/router` registers the API endpoints and connects them to handlers.
 - `internal/handler` processes HTTP requests and responses.
 - `internal/model` defines the movie and director data structures.
+- `internal/repository` contains the PostgreSQL CRUD queries.
 - `internal/service` is reserved for business logic as the application grows.
-- `migrations` will contain SQL schema migrations.
 - `docker-compose.yaml` runs the local PostgreSQL database.
+
+The request flow is:
+
+```text
+HTTP request → Router → Handler → Repository → PostgreSQL
+```
 
 ## PostgreSQL with Docker
 
@@ -125,11 +137,13 @@ docker compose down
 
 The named Docker volume `movie_postgres_data` preserves PostgreSQL data between container restarts.
 
+When the API starts, it opens a PostgreSQL connection pool and runs `CREATE TABLE IF NOT EXISTS`. No separate migration command is currently required.
+
 ## Movie format
 
 ```json
 {
-  "id": "1",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "isbn": "4368827",
   "title": "Movie 1",
   "director": {
@@ -139,7 +153,7 @@ The named Docker volume `movie_postgres_data` preserves PostgreSQL data between 
 }
 ```
 
-The server generates the `id` when a movie is created. When updating a movie, the ID is taken from the URL.
+PostgreSQL generates a UUID when a movie is created. When updating a movie, the ID is taken from the URL.
 
 ## API endpoints
 
@@ -164,7 +178,7 @@ curl http://localhost:8000/movies
 Get one movie:
 
 ```bash
-curl http://localhost:8000/movies/1
+curl http://localhost:8000/movies/550e8400-e29b-41d4-a716-446655440000
 ```
 
 Create a movie:
@@ -185,7 +199,7 @@ curl -X POST http://localhost:8000/movies \
 Replace a movie:
 
 ```bash
-curl -X PUT http://localhost:8000/movie/1 \
+curl -X PUT http://localhost:8000/movie/550e8400-e29b-41d4-a716-446655440000 \
   -H "Content-Type: application/json" \
   -d '{
     "isbn": "9876543",
@@ -202,16 +216,16 @@ Because this endpoint uses `PUT`, provide all movie fields in the request body.
 Delete a movie:
 
 ```bash
-curl -X DELETE http://localhost:8000/movies/2
+curl -X DELETE http://localhost:8000/movies/550e8400-e29b-41d4-a716-446655440000
 ```
 
 A successful deletion returns an empty response with status `204 No Content`.
 
 ## Notes
 
-- Data is stored in memory and resets whenever the server restarts.
-- The in-memory movie list starts empty; create records with `POST /movies`.
-- PostgreSQL is available through Docker, but the repository layer has not been connected to the handlers yet.
+- Movies are stored in PostgreSQL and remain available after the Go server restarts.
+- The movie list starts empty when a new Docker volume is created; add records with `POST /movies`.
+- Removing the Docker volume permanently removes the local database data.
 - This project is intended for learning Go HTTP APIs and REST fundamentals.
 
 ## Development checks
