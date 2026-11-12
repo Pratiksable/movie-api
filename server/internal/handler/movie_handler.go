@@ -1,83 +1,104 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
-	"math/rand"
+	"errors"
 	"movie-api/internal/model"
+	"movie-api/internal/repository"
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 )
 
-var movies []model.Movie
-
-func GetMovies(w http.ResponseWriter, r *http.Request) {
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(&movies)
+type MovieStore interface {
+	GetAll(context.Context) ([]model.Movie, error)
+	GetByID(context.Context, string) (model.Movie, error)
+	Create(context.Context, model.Movie) (model.Movie, error)
+	Update(context.Context, string, model.Movie) (model.Movie, error)
+	Delete(context.Context, string) error
 }
 
-func DeleteMovie(w http.ResponseWriter, r *http.Request) {
+type MovieHandler struct{ store MovieStore }
+
+func NewMovieHandler(store MovieStore) *MovieHandler { return &MovieHandler{store: store} }
+
+func (h *MovieHandler) GetMovies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	p := mux.Vars(r)
-	id := p["id"]
-	for index, item := range movies {
-		if item.ID == id {
-			movies = append(movies[:index], movies[index+1:]...)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-	}
-	http.Error(w, "Movie not found", http.StatusNotFound)
-
-}
-
-func GetMovie(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	p := mux.Vars(r)
-	for _, item := range movies {
-		if item.ID == p["id"] {
-			json.NewEncoder(w).Encode(item)
-			return
-		}
-	}
-	http.Error(w, "Movie not found", http.StatusNotFound)
-}
-
-func CreateMovie(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var movie model.Movie
-	err := json.NewDecoder(r.Body).Decode(&movie)
+	movies, err := h.store.GetAll(r.Context())
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, "Unable to get movies", http.StatusInternalServerError)
 		return
 	}
-	movie.ID = strconv.Itoa((rand.Intn(1000000000)))
-	movies = append(movies, movie)
-	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(movies)
+}
+
+func (h *MovieHandler) GetMovie(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	movie, err := h.store.GetByID(r.Context(), mux.Vars(r)["id"])
+	if errors.Is(err, repository.ErrMovieNotFound) {
+		http.Error(w, "Movie not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Unable to get movie", http.StatusInternalServerError)
+		return
+	}
 	json.NewEncoder(w).Encode(movie)
 }
 
-func UpdateMovie(w http.ResponseWriter, r *http.Request) {
+func (h *MovieHandler) CreateMovie(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	p := mux.Vars(r)
-	id := p["id"]
-
-	var updatedMovie model.Movie
-	err := json.NewDecoder(r.Body).Decode(&updatedMovie)
-	if err != nil {
+	var movie model.Movie
+	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	for index, item := range movies {
-		if item.ID == id {
-			updatedMovie.ID = id
-			movies[index] = updatedMovie
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+	if movie.Director == nil {
+		http.Error(w, "Director is required", http.StatusBadRequest)
+		return
 	}
-	http.Error(w, "Movie not found", http.StatusNotFound)
+	createdMovie, err := h.store.Create(r.Context(), movie)
+	if err != nil {
+		http.Error(w, "Unable to create movie", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(createdMovie)
+}
+
+func (h *MovieHandler) UpdateMovie(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var movie model.Movie
+	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if movie.Director == nil {
+		http.Error(w, "Director is required", http.StatusBadRequest)
+		return
+	}
+	updatedMovie, err := h.store.Update(r.Context(), mux.Vars(r)["id"], movie)
+	if errors.Is(err, repository.ErrMovieNotFound) {
+		http.Error(w, "Movie not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Unable to update movie", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(updatedMovie)
+}
+
+func (h *MovieHandler) DeleteMovie(w http.ResponseWriter, r *http.Request) {
+	err := h.store.Delete(r.Context(), mux.Vars(r)["id"])
+	if errors.Is(err, repository.ErrMovieNotFound) {
+		http.Error(w, "Movie not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Unable to delete movie", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
